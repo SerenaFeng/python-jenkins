@@ -84,6 +84,8 @@ LAUNCHER_COMMAND = 'hudson.slaves.CommandLauncher'
 LAUNCHER_JNLP = 'hudson.slaves.JNLPLauncher'
 LAUNCHER_WINDOWS_SERVICE = 'hudson.os.windows.ManagedWindowsServiceLauncher'
 DEFAULT_HEADERS = {'Content-Type': 'text/xml; charset=utf-8'}
+URLENCODE_HEADERS = {'Content-Type': 'application/x-www-form-urlencoded'}
+
 
 # REST Endpoints
 INFO = 'api/json'
@@ -128,6 +130,8 @@ DELETE_PROMOTION = '%(folder_url)sjob/%(short_name)s/promotion/process/%(name)s/
 CREATE_PROMOTION = '%(folder_url)sjob/%(short_name)s/promotion/createProcess?name=%(name)s'
 CONFIG_PROMOTION = '%(folder_url)sjob/%(short_name)s/promotion/process/%(name)s/config.xml'
 QUIET_DOWN = 'quietDown'
+CREDENTIAL_ID = 'credentials/store/system/domain/%(scope)s/credential/%(id)s/'
+CREATE_CREDENTIAL = 'credentials/store/system/domain/%(scope)s/createCredentials'
 
 # for testing only
 EMPTY_CONFIG_XML = '''<?xml version='1.0' encoding='UTF-8'?>
@@ -1702,3 +1706,77 @@ class Jenkins(object):
             time.sleep(1)
 
         return False
+
+    def credential_exists(self, id, scope):
+        '''Check whether a view exists
+
+        :param name: Name of Jenkins view, ``str``
+        :returns: ``True`` if Jenkins view exists
+        '''
+        if self.get_credential_id(id, scope):
+            return True
+
+    def get_credential_id(self, id, scope):
+        '''Return the name of a view using the API.
+
+        That is roughly an identity method which can be used to quickly verify
+        a view exists or is accessible without causing too much stress on the
+        server side.
+
+        :param name: View name, ``str``
+        :returns: Name of view or None
+        '''
+        try:
+            response = self.jenkins_open(Request(
+                self._build_url(CREDENTIAL_ID, locals())))
+        except NotFoundException:
+            return None
+        else:
+            print response
+            return response
+
+    def create_credential(self, id, scope, username, password=''):
+        '''Create a new Jenkins view
+
+        :param name: Name of Jenkins view, ``str``
+        :param config_xml: config file text, ``str``
+        '''
+        if self.credential_exists(id, scope):
+            raise JenkinsException('credential[%s] already exists' % (id))
+
+        inner_params = {
+            "": "0",
+            "credentials": {
+                "scope": "GLOBAL",
+                "id": id,
+                "username": username,
+                "password": password,
+                "description": 'python-jenkins test',
+                "$class": "com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl"
+            }
+        }
+
+        params = {
+            'json': inner_params
+        }
+
+        data = urlencode(params)
+        self.jenkins_open(Request(
+            self._build_url(CREATE_CREDENTIAL, locals()), data, URLENCODE_HEADERS))
+
+        # self.jenkins_open(Request(
+        #     self._build_url(CREATE_VIEW, locals()),
+        #     config_xml.encode('utf-8'), DEFAULT_HEADERS))
+        self.assert_credential_exists(id, scope)
+
+    def assert_credential_exists(self, id, scope,
+                          exception_message='credential[%s] does not exist in [%s]'):
+        '''Raise an exception if a job does not exist
+
+        :param name: Name of Jenkins job, ``str``
+        :param exception_message: Message to use for the exception. Formatted
+                                  with ``name``
+        :throws: :class:`JenkinsException` whenever the job does not exist
+        '''
+        if not self.credential_exists(id, scope):
+            raise JenkinsException(exception_message % (id, scope))
